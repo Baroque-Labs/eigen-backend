@@ -3,6 +3,7 @@ import random
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from eigen import models, schemas
@@ -70,10 +71,15 @@ def tick(campaign_id: int, db: Session = Depends(get_db)):
     if not c:
         raise HTTPException(404, "campaign not found")
 
-    sent_sub = db.query(models.Send.recipient_id).filter_by(campaign_id=campaign_id).subquery()
+    sent_ids = select(models.Send.recipient_id).where(models.Send.campaign_id == campaign_id)
+    suppressed = select(models.Suppression.email)
     batch = (
         db.query(models.Recipient)
-        .filter(models.Recipient.campaign_id == campaign_id, ~models.Recipient.id.in_(sent_sub))
+        .filter(
+            models.Recipient.campaign_id == campaign_id,
+            ~models.Recipient.id.in_(sent_ids),
+            ~models.Recipient.email.in_(suppressed),
+        )
         .limit(c.batch_size)
         .all()
     )

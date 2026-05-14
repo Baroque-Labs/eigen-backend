@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eigen.db import Base
@@ -65,5 +65,19 @@ class Event(Base):
     __tablename__ = "event"
     id: Mapped[int] = mapped_column(primary_key=True)
     send_id: Mapped[int] = mapped_column(ForeignKey("send.id"))
-    kind: Mapped[str] = mapped_column(String(20))  # "click"
+    kind: Mapped[str] = mapped_column(String(40))  # click | open | bounced | complained | delivered
+    at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # Provider event id for idempotency. NULL for events we synthesized ourselves.
+    provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    provider_event_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    raw: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (UniqueConstraint("provider", "provider_event_id", name="uq_event_provider_event"),)
+
+
+class Suppression(Base):
+    __tablename__ = "suppression"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    reason: Mapped[str] = mapped_column(String(40))  # bounce | complaint | unsubscribe
     at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
