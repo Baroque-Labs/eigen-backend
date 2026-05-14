@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from eigen import models, schemas
 from eigen.auth import hash_key, mint_key, require_org
 from eigen.bandit import inherited_prior, prob_best, sample_variant
+from eigen.generator import get_generator
 from eigen.config import settings
 from eigen.db import get_db
 from eigen.esp import get_dispatcher
@@ -47,12 +48,18 @@ def create_campaign(
     ctrs: dict[str, float] = {str(baseline.id): payload.baseline.true_ctr}
 
     # Spawn n_variants - 1 children from baseline with inherited (diffuse) prior.
+    generator = get_generator()
+    history: list[str] = [baseline.subject]
     for _ in range(payload.n_variants - 1):
         a, b = inherited_prior(baseline.alpha, baseline.beta, pseudo_count=4.0)
+        generated = generator.generate(
+            parent_subject=baseline.subject, parent_body=baseline.body, history=history
+        )
+        history.append(generated.subject)
         child = models.Variant(
             campaign_id=c.id,
-            subject=f"{baseline.subject} (variant)",
-            body=baseline.body,
+            subject=generated.subject,
+            body=generated.body,
             parent_id=baseline.id,
             alpha=a,
             beta=b,

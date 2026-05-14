@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from eigen import models
 from eigen.bandit import inherited_prior, prob_best
+from eigen.generator import get_generator
 
 KILL_PROB_BEST = 0.05
 KILL_MIN_SAMPLES = 200
@@ -27,13 +28,18 @@ def _mean(v: models.Variant) -> float:
 
 def _spawn_child(db: Session, campaign: models.Campaign, parent: models.Variant) -> models.Variant:
     a, b = inherited_prior(parent.alpha, parent.beta, pseudo_count=4.0)
+    history = [v.subject for v in db.query(models.Variant).filter_by(campaign_id=campaign.id).all()]
+    generated = get_generator().generate(
+        parent_subject=parent.subject, parent_body=parent.body, history=history
+    )
     new = models.Variant(
         campaign_id=campaign.id,
-        subject=f"{parent.subject} (variant)",
-        body=parent.body,
+        subject=generated.subject,
+        body=generated.body,
         parent_id=parent.id,
         alpha=a,
         beta=b,
+        status="active",
     )
     db.add(new)
     db.flush()
