@@ -145,6 +145,35 @@ async def _get_pool():
     return _pool
 
 
+@router.delete("/campaigns/{campaign_id}")
+def delete_campaign(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
+    """Hard-delete a campaign and every row that depends on it.
+
+    FK order: events → sends → posteriors → decisions → variants → recipients
+    → campaign. No undo.
+    """
+    c = _owned_campaign(db, campaign_id, org)
+
+    send_ids = [s[0] for s in db.query(models.Send.id).filter_by(campaign_id=campaign_id).all()]
+    variant_ids = [v[0] for v in db.query(models.Variant.id).filter_by(campaign_id=campaign_id).all()]
+
+    if send_ids:
+        db.query(models.Event).filter(models.Event.send_id.in_(send_ids)).delete(synchronize_session=False)
+    db.query(models.Send).filter_by(campaign_id=campaign_id).delete(synchronize_session=False)
+    if variant_ids:
+        db.query(models.Posterior).filter(models.Posterior.variant_id.in_(variant_ids)).delete(synchronize_session=False)
+    db.query(models.Decision).filter_by(campaign_id=campaign_id).delete(synchronize_session=False)
+    db.query(models.Variant).filter_by(campaign_id=campaign_id).delete(synchronize_session=False)
+    db.query(models.Recipient).filter_by(campaign_id=campaign_id).delete(synchronize_session=False)
+    db.delete(c)
+    db.commit()
+    return {"deleted": campaign_id}
+
+
 @router.post("/campaigns/{campaign_id}/recipients")
 def add_recipients(
     campaign_id: int,
