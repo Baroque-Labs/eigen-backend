@@ -25,6 +25,14 @@ def prob_best(variants: list, n_samples: int = 4000, rng: np.random.Generator | 
     return {v.id: float(p) for v, p in zip(active, probs)}
 
 
+def inherited_prior(parent_alpha: float, parent_beta: float, pseudo_count: float = 4.0) -> tuple[float, float]:
+    """Weak prior centered on parent's posterior mean. ~pseudo_count effective samples worth."""
+    mean = parent_alpha / (parent_alpha + parent_beta)
+    a = max(1e-3, mean * pseudo_count)
+    b = max(1e-3, (1.0 - mean) * pseudo_count)
+    return a, b
+
+
 def posterior_variance(alpha: float, beta: float) -> float:
     a, b = alpha, beta
     return (a * b) / ((a + b) ** 2 * (a + b + 1))

@@ -14,6 +14,9 @@ class Campaign(Base):
     __tablename__ = "campaign"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
+    n_variants: Mapped[int] = mapped_column(Integer, default=4)
+    n_batches: Mapped[int] = mapped_column(Integer, default=10)
+    batch_size: Mapped[int] = mapped_column(Integer, default=100)
     # smoke-screen: hidden ground-truth CTR per variant_id for simulation
     true_ctrs: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -53,7 +56,7 @@ class Send(Base):
     variant_id: Mapped[int] = mapped_column(ForeignKey("variant.id"))
     recipient_id: Mapped[int] = mapped_column(ForeignKey("recipient.id"))
     sent_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    settled: Mapped[int] = mapped_column(Integer, default=0)  # 0=open, 1=closed
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Event(Base):

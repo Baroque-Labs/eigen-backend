@@ -39,13 +39,13 @@ The simulator drives a 3-variant campaign through 25 rounds of 200 sends, feedin
 
 | Method | Path | What |
 |---|---|---|
-| POST | `/campaigns` | create campaign + initial variants (with hidden true_ctr for sim) |
-| POST | `/campaigns/{id}/recipients` | bulk add recipients |
-| POST | `/campaigns/{id}/tick?n=N` | sample + dispatch a batch of N |
-| POST | `/events` | record event (e.g. click), updates posterior immediately |
-| POST | `/campaigns/{id}/settle` | close un-clicked sends as failures (β += 1) |
+| POST | `/campaigns` | create campaign: `{name, baseline, n_variants, n_batches, emails[]}` — server seeds `n_variants - 1` children from the baseline with inherited priors |
+| POST | `/campaigns/{id}/tick` | sample + dispatch one batch (batch size derived from `len(emails)/n_batches`) |
+| POST | `/events` | record an event (e.g. click), updates posterior immediately |
+| POST | `/campaigns/{id}/settle?window_seconds=N` | settle sends older than N seconds as failures (β += 1) |
 | POST | `/campaigns/{id}/research` | run generation policy (kill/spawn) |
 | GET | `/campaigns/{id}/state` | variants with α, β, mean, P(best), sends/clicks |
+| GET | `/campaigns/{id}/_truth` | **smoke-screen**: hidden ground-truth CTRs for the simulator |
 
 ## Smoke-screened pieces (to be replaced)
 
@@ -56,8 +56,16 @@ The simulator drives a 3-variant campaign through 25 rounds of 200 sends, feedin
 
 ## Bandit math
 
-- Conjugate Beta-Binomial: each variant has `α, β` (starts at `1, 1` — diffuse prior).
+- Conjugate Beta-Binomial: each variant has `α, β`.
+- **Baseline** starts at `Beta(1, 1)` — diffuse prior.
+- **Spawned variants** start at `Beta(μ·k, (1−μ)·k)` with `k=4` (inherited prior centered on parent's posterior mean; gets washed out by real data within ~few dozen samples).
 - Thompson sampling per-recipient: draw `θᵢ ~ Beta(αᵢ, βᵢ)`, send the argmax variant.
-- Click → `α += 1`, settle window → `β += 1` for un-clicked sends.
+- Click → `α += 1`; sends older than the settle window with no click → `β += 1`.
 - `P(best)` estimated by Monte Carlo over the posteriors (4k samples).
-- Generation policy: kill variants with `P(best) < 0.05` after ≥100 samples; spawn a child from the leader when all survivors' posterior variance falls below threshold.
+- Generation policy:
+  - **Kill** any non-leader with `P(best) < 0.05` after ≥200 samples. The current lifetime leader (highest posterior mean among variants with ≥200 samples) is immune.
+  - **Spawn** children from the current best survivor until active variant count == `n_variants`.
+
+## Heads up
+
+This is a prototype; no migrations. If you change the schema, delete `eigen.db` and restart.

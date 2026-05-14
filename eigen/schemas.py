@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
 
 
-class VariantIn(BaseModel):
+class BaselineVariant(BaseModel):
     subject: str
     body: str = ""
     true_ctr: float = Field(0.05, ge=0.0, le=1.0)  # smoke-screen
@@ -9,15 +9,10 @@ class VariantIn(BaseModel):
 
 class CampaignIn(BaseModel):
     name: str
-    variants: list[VariantIn]
-
-
-class RecipientIn(BaseModel):
-    email: EmailStr
-
-
-class RecipientsIn(BaseModel):
-    recipients: list[RecipientIn]
+    baseline: BaselineVariant
+    n_variants: int = Field(4, ge=1, le=64)
+    n_batches: int = Field(10, ge=1)
+    emails: list[EmailStr]
 
 
 class EventIn(BaseModel):
@@ -32,7 +27,7 @@ class VariantOut(BaseModel):
     alpha: float
     beta: float
     mean: float
-    samples: int
+    samples: float
     prob_best: float
     parent_id: int | None
 
@@ -40,6 +35,9 @@ class VariantOut(BaseModel):
 class CampaignState(BaseModel):
     id: int
     name: str
+    n_variants: int
+    n_batches: int
+    batch_size: int
     variants: list[VariantOut]
     total_sends: int
     total_clicks: int
