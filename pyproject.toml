@@ -13,7 +13,6 @@ dependencies = [
     "email-validator>=2.0",
     "pydantic-settings>=2.4",
     "psycopg[binary]>=3.2",
-    "alembic>=1.13",
     "arq>=0.26",
     "anthropic>=0.40",
     "resend>=2.0",
