@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from eigen import models
 from eigen.bandit import inherited_prior, prob_best
+from eigen.config import settings
 from eigen.generator import get_generator
 
 KILL_PROB_BEST = 0.05
@@ -32,6 +33,7 @@ def _spawn_child(db: Session, campaign: models.Campaign, parent: models.Variant)
     generated = get_generator().generate(
         parent_subject=parent.subject, parent_body=parent.body, history=history
     )
+    initial_status = "active" if settings().auto_spawn else "pending"
     new = models.Variant(
         campaign_id=campaign.id,
         subject=generated.subject,
@@ -39,7 +41,7 @@ def _spawn_child(db: Session, campaign: models.Campaign, parent: models.Variant)
         parent_id=parent.id,
         alpha=a,
         beta=b,
-        status="active",
+        status=initial_status,
     )
     db.add(new)
     db.flush()
@@ -73,15 +75,21 @@ def run_research(db: Session, campaign_id: int) -> dict:
                 v.status = "killed"
                 killed.append(v.id)
 
-    # Refill toward n_variants from current best survivor.
+    # Refill toward n_variants from current best survivor. Count active + pending so
+    # awaiting-approval variants don't get refilled twice.
     spawned: list[int] = []
-    survivors = [v for v in db.query(models.Variant).filter_by(campaign_id=campaign_id, status="active").all()]
-    if survivors:
-        seed = max(survivors, key=_mean)
-        while len(survivors) < campaign.n_variants:
+    current = [
+        v
+        for v in db.query(models.Variant).filter_by(campaign_id=campaign_id).all()
+        if v.status in ("active", "pending")
+    ]
+    active = [v for v in current if v.status == "active"]
+    if active:
+        seed = max(active, key=_mean)
+        while len(current) < campaign.n_variants:
             child = _spawn_child(db, campaign, seed)
             spawned.append(child.id)
-            survivors.append(child)
+            current.append(child)
 
     db.commit()
     return {"killed": killed, "spawned": spawned}

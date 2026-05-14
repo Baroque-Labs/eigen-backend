@@ -49,6 +49,7 @@ def create_campaign(
 
     # Spawn n_variants - 1 children from baseline with inherited (diffuse) prior.
     generator = get_generator()
+    initial_status = "active" if settings().auto_spawn else "pending"
     history: list[str] = [baseline.subject]
     for _ in range(payload.n_variants - 1):
         a, b = inherited_prior(baseline.alpha, baseline.beta, pseudo_count=4.0)
@@ -63,6 +64,7 @@ def create_campaign(
             parent_id=baseline.id,
             alpha=a,
             beta=b,
+            status=initial_status,
         )
         db.add(child)
         db.flush()
@@ -201,6 +203,58 @@ def settle(
         s.settled_at = utcnow()
     db.commit()
     return {"settled": len(unsettled)}
+
+
+@router.get("/campaigns/{campaign_id}/pending")
+def pending_variants(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
+    _owned_campaign(db, campaign_id, org)
+    pending = db.query(models.Variant).filter_by(campaign_id=campaign_id, status="pending").all()
+    return {
+        "variants": [
+            {"id": v.id, "subject": v.subject, "body": v.body, "parent_id": v.parent_id}
+            for v in pending
+        ]
+    }
+
+
+@router.post("/campaigns/{campaign_id}/variants/{variant_id}/approve")
+def approve_variant(
+    campaign_id: int,
+    variant_id: int,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
+    _owned_campaign(db, campaign_id, org)
+    v = db.get(models.Variant, variant_id)
+    if not v or v.campaign_id != campaign_id:
+        raise HTTPException(404, "variant not found")
+    if v.status != "pending":
+        raise HTTPException(409, f"variant is {v.status}, not pending")
+    v.status = "active"
+    db.commit()
+    return {"id": v.id, "status": "active"}
+
+
+@router.post("/campaigns/{campaign_id}/variants/{variant_id}/reject")
+def reject_variant(
+    campaign_id: int,
+    variant_id: int,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
+    _owned_campaign(db, campaign_id, org)
+    v = db.get(models.Variant, variant_id)
+    if not v or v.campaign_id != campaign_id:
+        raise HTTPException(404, "variant not found")
+    if v.status != "pending":
+        raise HTTPException(409, f"variant is {v.status}, not pending")
+    v.status = "rejected"
+    db.commit()
+    return {"id": v.id, "status": "rejected"}
 
 
 @router.post("/campaigns/{campaign_id}/research")
