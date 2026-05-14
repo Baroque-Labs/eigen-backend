@@ -111,6 +111,18 @@ class Event(Base):
     __table_args__ = (UniqueConstraint("provider", "provider_event_id", name="uq_event_provider_event"),)
 
 
+class Decision(Base):
+    """Audit log of every kill/spawn/stop the policy made."""
+    __tablename__ = "decision"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaign.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # kill | spawn | stop
+    variant_id: Mapped[int | None] = mapped_column(ForeignKey("variant.id"), nullable=True)
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Suppression(Base):
     __tablename__ = "suppression"
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -280,6 +280,34 @@ def research(
     return run_research(db, campaign_id)
 
 
+@router.get("/campaigns/{campaign_id}/decisions")
+def list_decisions(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
+    _owned_campaign(db, campaign_id, org)
+    rows = (
+        db.query(models.Decision)
+        .filter_by(campaign_id=campaign_id)
+        .order_by(models.Decision.at.asc())
+        .all()
+    )
+    return {
+        "decisions": [
+            {
+                "id": d.id,
+                "kind": d.kind,
+                "variant_id": d.variant_id,
+                "reason": d.reason,
+                "snapshot": d.snapshot,
+                "at": d.at.isoformat(),
+            }
+            for d in rows
+        ]
+    }
+
+
 @router.get("/campaigns/{campaign_id}/_truth")
 def truth(
     campaign_id: int,

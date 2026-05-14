@@ -116,6 +116,13 @@ def run_research(db: Session, campaign_id: int) -> dict:
     cohorts = _cohorts_in_campaign(db, campaign_id)
     killed: list[int] = []
 
+    def _snapshot(variant: models.Variant) -> dict:
+        snap = {}
+        for co in cohorts:
+            p = get_or_create_posterior(db, variant, co)
+            snap[co] = {"alpha": p.alpha, "beta": p.beta}
+        return snap
+
     if len(active) >= 2:
         # Kill any non-leader that loses across ALL eligible cohorts.
         for v in active:
@@ -142,6 +149,15 @@ def run_research(db: Session, campaign_id: int) -> dict:
             if eligible_cohorts > 0 and kill_votes == eligible_cohorts:
                 v.status = "killed"
                 killed.append(v.id)
+                db.add(
+                    models.Decision(
+                        campaign_id=campaign_id,
+                        kind="kill",
+                        variant_id=v.id,
+                        reason=f"lost in all {eligible_cohorts} eligible cohort(s) with P(best)<{KILL_PROB_BEST}",
+                        snapshot=_snapshot(v),
+                    )
+                )
 
     # Refill toward n_variants from default-cohort posterior leader.
     spawned: list[int] = []
@@ -157,6 +173,15 @@ def run_research(db: Session, campaign_id: int) -> dict:
             child = _spawn_child(db, campaign, seed)
             spawned.append(child.id)
             current.append(child)
+            db.add(
+                models.Decision(
+                    campaign_id=campaign_id,
+                    kind="spawn",
+                    variant_id=child.id,
+                    reason=f"refill to n_variants={campaign.n_variants}, seeded from variant {seed.id}",
+                    snapshot={"parent_id": seed.id, "inherited_prior": [child.alpha, child.beta]},
+                )
+            )
 
     # Check stopping
     stop_reason = _check_stopping(db, campaign, cohorts)
@@ -164,6 +189,15 @@ def run_research(db: Session, campaign_id: int) -> dict:
         campaign.status = "stopped"
         campaign.stopped_at = utcnow()
         campaign.stopped_reason = stop_reason
+        db.add(
+            models.Decision(
+                campaign_id=campaign_id,
+                kind="stop",
+                variant_id=None,
+                reason=stop_reason,
+                snapshot={v.id: _snapshot(v) for v in active},
+            )
+        )
 
     db.commit()
     return {
