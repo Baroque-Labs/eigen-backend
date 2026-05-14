@@ -80,14 +80,12 @@ railway variables --kv | grep DATABASE_PUBLIC_URL
 Then:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+make install                   # creates .venv and pip install -e .
 cp .env.example .env           # paste the Railway URL into EIGEN_DATABASE_URL
 
-uvicorn eigen.main:app --reload     # schema auto-created on first boot
-
-# Worker (in another shell, optional — only needed if EIGEN_SCHEDULER_ENABLED=true)
-arq eigen.worker.WorkerSettings
+make dev                       # http://localhost:8000, autoreload, schema auto-created on first boot
+make test                      # unit + integration
+make worker                    # optional — only needed if EIGEN_SCHEDULER_ENABLED=true
 ```
 
 Redis for arq still runs locally on the default `redis://localhost:6379/0` — install it via your package manager or skip the worker. (We can move Redis to Railway too if the scheduler ever runs in prod.)
