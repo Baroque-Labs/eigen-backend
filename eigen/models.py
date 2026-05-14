@@ -57,6 +57,8 @@ class Send(Base):
     recipient_id: Mapped[int] = mapped_column(ForeignKey("recipient.id"))
     sent_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     settled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
 
 
 class Event(Base):

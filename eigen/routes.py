@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from eigen import models, schemas
 from eigen.bandit import inherited_prior, prob_best, sample_variant
 from eigen.db import get_db
-from eigen.dispatcher import dispatch
+from eigen.esp import get_dispatcher
 from eigen.models import utcnow
 from eigen.policy import run_research
 
@@ -81,6 +81,7 @@ def tick(campaign_id: int, db: Session = Depends(get_db)):
         return {"sends": [], "note": "no recipients remaining"}
 
     variants = db.query(models.Variant).filter_by(campaign_id=campaign_id).all()
+    dispatcher = get_dispatcher()
     sends = []
     for r in batch:
         vid = sample_variant(variants)
@@ -88,7 +89,14 @@ def tick(campaign_id: int, db: Session = Depends(get_db)):
         s = models.Send(campaign_id=campaign_id, variant_id=vid, recipient_id=r.id)
         db.add(s)
         db.flush()
-        dispatch(s.id, r.email, variant.subject, variant.body)
+        result = dispatcher.send(
+            to=r.email,
+            subject=variant.subject,
+            html=variant.body,
+            headers={"X-Eigen-Send-Id": str(s.id)},
+        )
+        s.provider = result.provider
+        s.provider_message_id = result.provider_message_id
         sends.append({"send_id": s.id, "recipient": r.email, "variant_id": vid})
     db.commit()
     return {"sends": sends}
