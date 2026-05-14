@@ -1,0 +1,17 @@
+[project]
+name = "eigen-backend"
+version = "0.0.1"
+description = "Eigen backend prototype: multi-armed bandit email testing"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.7",
+    "numpy>=1.26",
+    "httpx>=0.27",
+    "email-validator>=2.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["eigen*"]
