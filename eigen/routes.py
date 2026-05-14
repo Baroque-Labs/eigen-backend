@@ -21,6 +21,51 @@ from eigen.policy import run_research
 router = APIRouter()
 
 
+@router.get("/campaigns")
+def list_campaigns(
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+    limit: int = 50,
+):
+    """List campaigns for the calling org, newest first."""
+    rows = (
+        db.query(models.Campaign)
+        .filter_by(org_id=org.id)
+        .order_by(models.Campaign.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    out = []
+    for c in rows:
+        total_sends = db.query(models.Send).filter_by(campaign_id=c.id).count()
+        total_clicks = (
+            db.query(models.Event)
+            .join(models.Send, models.Event.send_id == models.Send.id)
+            .filter(
+                models.Send.campaign_id == c.id, models.Event.kind == "click"
+            )
+            .count()
+        )
+        active_variants = (
+            db.query(models.Variant)
+            .filter_by(campaign_id=c.id, status="active")
+            .count()
+        )
+        out.append(
+            {
+                "id": c.id,
+                "name": c.name,
+                "status": c.status,
+                "n_variants": c.n_variants,
+                "active_variants": active_variants,
+                "total_sends": total_sends,
+                "total_clicks": total_clicks,
+                "created_at": c.created_at.isoformat(),
+            }
+        )
+    return {"campaigns": out}
+
+
 @router.post("/campaigns")
 def create_campaign(
     payload: schemas.CampaignIn,
@@ -98,6 +143,95 @@ async def _get_pool():
     if _pool is None:
         _pool = await create_pool(RedisSettings.from_dsn(settings().redis_url))
     return _pool
+
+
+@router.post("/campaigns/{campaign_id}/recipients")
+def add_recipients(
+    campaign_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
+    """Bulk-add recipients to a running campaign.
+
+    Body: {"emails": ["a@b.com", ...]} or {"recipients": [{"email": ..., "cohort": ...}]}
+    """
+    _owned_campaign(db, campaign_id, org)
+    emails = payload.get("emails") or []
+    recipients = payload.get("recipients") or []
+    n = 0
+    for email in emails:
+        db.add(models.Recipient(campaign_id=campaign_id, email=email))
+        n += 1
+    for r in recipients:
+        db.add(
+            models.Recipient(
+                campaign_id=campaign_id,
+                email=r["email"],
+                cohort=r.get("cohort", "default"),
+            )
+        )
+        n += 1
+    db.commit()
+    return {"added": n}
+
+
+@router.get("/campaigns/{campaign_id}/timeseries")
+def timeseries(
+    campaign_id: int,
+    interval_seconds: int = 3600,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
+    """Bucketed sends + clicks for sparklines. Returns latest 24 buckets."""
+    from sqlalchemy import func
+
+    _owned_campaign(db, campaign_id, org)
+    sec = max(60, interval_seconds)
+
+    # Aggregate sends by bucket
+    sends_rows = (
+        db.query(
+            (func.strftime("%s", models.Send.sent_at) / sec).label("bucket")
+            if "sqlite" in str(db.bind.dialect)
+            else (func.extract("epoch", models.Send.sent_at) / sec).label("bucket"),
+            func.count(models.Send.id).label("n"),
+        )
+        .filter(models.Send.campaign_id == campaign_id)
+        .group_by("bucket")
+        .all()
+    )
+    sends_by_bucket = {int(b): int(n) for b, n in sends_rows if b is not None}
+
+    # Clicks join
+    clicks_rows = (
+        db.query(
+            (func.strftime("%s", models.Event.at) / sec).label("bucket")
+            if "sqlite" in str(db.bind.dialect)
+            else (func.extract("epoch", models.Event.at) / sec).label("bucket"),
+            func.count(models.Event.id).label("n"),
+        )
+        .join(models.Send, models.Event.send_id == models.Send.id)
+        .filter(
+            models.Send.campaign_id == campaign_id, models.Event.kind == "click"
+        )
+        .group_by("bucket")
+        .all()
+    )
+    clicks_by_bucket = {int(b): int(n) for b, n in clicks_rows if b is not None}
+
+    all_buckets = sorted(set(sends_by_bucket) | set(clicks_by_bucket))[-24:]
+    return {
+        "interval_seconds": sec,
+        "points": [
+            {
+                "bucket_start": b * sec,
+                "sends": sends_by_bucket.get(b, 0),
+                "clicks": clicks_by_bucket.get(b, 0),
+            }
+            for b in all_buckets
+        ],
+    }
 
 
 @router.post("/campaigns/{campaign_id}/tick")
@@ -361,6 +495,7 @@ def state(
             schemas.VariantOut(
                 id=v.id,
                 subject=v.subject,
+                body=v.body,
                 status=v.status,
                 parent_id=v.parent_id,
                 cohorts=per_cohort,

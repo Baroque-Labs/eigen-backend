@@ -45,6 +45,7 @@ class CohortPosterior(BaseModel):
 class VariantOut(BaseModel):
     id: int
     subject: str
+    body: str
     status: str
     parent_id: int | None
     cohorts: list[CohortPosterior]

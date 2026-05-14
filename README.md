@@ -68,21 +68,27 @@ Production-shaped implementation of the Eigen multi-armed bandit email-testing p
 
 ## Run
 
+Postgres lives on Railway — there is no local DB. Grab the public connection
+string once:
+
 ```bash
-docker compose up -d           # postgres + redis
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
-cp .env.example .env           # then edit
-alembic upgrade head
-
-# Web
-uvicorn eigen.main:app --reload
-
-# Worker (in another shell)
-arq eigen.worker.WorkerSettings
+railway link --project eigen
+railway service link Postgres
+railway variables --kv | grep DATABASE_PUBLIC_URL
 ```
 
-For local dev with SQLite + no scheduler, just `pip install -e .` and `uvicorn eigen.main:app --reload` — `EIGEN_DATABASE_URL` defaults to SQLite and `EIGEN_ESP=log` is a no-op stdout dispatcher.
+Then:
+
+```bash
+make install                   # creates .venv and pip install -e .
+cp .env.example .env           # paste the Railway URL into EIGEN_DATABASE_URL
+
+make dev                       # http://localhost:8000, autoreload, schema auto-created on first boot
+make test                      # unit + integration
+make worker                    # optional — only needed if EIGEN_SCHEDULER_ENABLED=true
+```
+
+Redis for arq still runs locally on the default `redis://localhost:6379/0` — install it via your package manager or skip the worker. (We can move Redis to Railway too if the scheduler ever runs in prod.)
 
 ## Configuration
 
@@ -129,4 +135,4 @@ The statistical suite is the load-bearing one for bandit correctness:
 
 ## Heads up
 
-This is a private prototype. If you change the schema, run `alembic revision --autogenerate -m "..."` then `alembic upgrade head`. SQLite migrations use batch mode (configured in `alembic/env.py`) to handle column alters.
+This is a private prototype. There are no migrations — schema lives in `eigen/models.py` and SQLAlchemy's `Base.metadata.create_all` runs on startup, which only **adds** missing tables/columns. If you need to change a column type or rename, drop the affected database (`psql $EIGEN_DATABASE_URL -c "DROP TABLE <name>"` or recreate the DB) and let it recreate on next boot. Add Alembic back if you ever need to preserve data across migrations.
