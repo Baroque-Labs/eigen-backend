@@ -24,11 +24,7 @@ import httpx
 BASE = os.environ.get("EIGEN_SEED_BASE", "http://localhost:8000")
 NAME = os.environ.get("EIGEN_SEED_NAME", "Demo")
 TARGET_WORKSPACE = os.environ.get("EIGEN_SEED_TARGET", "dev workspace")
-FRONTEND_DB_URL = os.environ.get(
-    "FRONTEND_DATABASE_URL",
-    # Default matches eigen/.env on this machine. Override via env in CI/prod.
-    "postgresql://postgres:REDACTED@yamanote.proxy.rlwy.net:30752/eigen_fe",
-)
+FRONTEND_DB_URL = os.environ.get("FRONTEND_DATABASE_URL")
 MASTER_KEY = os.environ.get("EIGEN_SEED_KEY", "ek_master_dev_dont_use_in_prod")
 CSV_PATH = Path(__file__).parent / "sample_recipients.csv"
 
@@ -43,6 +39,8 @@ def lookup_dashboard_key(workspace_name: str) -> str | None:
 
     Returns None if the frontend DB isn't reachable or no row matches.
     """
+    if not FRONTEND_DB_URL:
+        return None
     try:
         import psycopg  # type: ignore
     except ImportError:
