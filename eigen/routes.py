@@ -2,12 +2,15 @@ import math
 import random
 from datetime import timedelta
 
+from arq import create_pool
+from arq.connections import RedisSettings
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from eigen import models, schemas
 from eigen.bandit import inherited_prior, prob_best, sample_variant
+from eigen.config import settings
 from eigen.db import get_db
 from eigen.esp import get_dispatcher
 from eigen.models import utcnow
@@ -64,9 +67,23 @@ def create_campaign(payload: schemas.CampaignIn, db: Session = Depends(get_db)):
     return {"id": c.id, "name": c.name, "batch_size": batch_size, "n_variants": payload.n_variants}
 
 
+_pool = None
+
+
+async def _get_pool():
+    global _pool
+    if _pool is None:
+        _pool = await create_pool(RedisSettings.from_dsn(settings().redis_url))
+    return _pool
+
+
 @router.post("/campaigns/{campaign_id}/tick")
-def tick(campaign_id: int, db: Session = Depends(get_db)):
-    """Pull next batch_size recipients, Thompson-sample a variant each, dispatch."""
+async def tick(campaign_id: int, db: Session = Depends(get_db)):
+    """Pull next batch_size recipients, Thompson-sample a variant each, dispatch.
+
+    In sync mode dispatches inline. In async mode enqueues to arq and returns immediately
+    (Send rows are persisted with no provider_message_id; the worker fills them in).
+    """
     c = db.get(models.Campaign, campaign_id)
     if not c:
         raise HTTPException(404, "campaign not found")
@@ -87,25 +104,37 @@ def tick(campaign_id: int, db: Session = Depends(get_db)):
         return {"sends": [], "note": "no recipients remaining"}
 
     variants = db.query(models.Variant).filter_by(campaign_id=campaign_id).all()
-    dispatcher = get_dispatcher()
+    mode = settings().send_mode
+    dispatcher = get_dispatcher() if mode == "sync" else None
+    pool = await _get_pool() if mode == "async" else None
+
     sends = []
+    pending_jobs: list[tuple[int, str, str, str]] = []
     for r in batch:
         vid = sample_variant(variants)
         variant = next(v for v in variants if v.id == vid)
         s = models.Send(campaign_id=campaign_id, variant_id=vid, recipient_id=r.id)
         db.add(s)
         db.flush()
-        result = dispatcher.send(
-            to=r.email,
-            subject=variant.subject,
-            html=variant.body,
-            headers={"X-Eigen-Send-Id": str(s.id)},
-        )
-        s.provider = result.provider
-        s.provider_message_id = result.provider_message_id
+        if mode == "sync":
+            result = dispatcher.send(
+                to=r.email,
+                subject=variant.subject,
+                html=variant.body,
+                headers={"X-Eigen-Send-Id": str(s.id)},
+            )
+            s.provider = result.provider
+            s.provider_message_id = result.provider_message_id
+        else:
+            pending_jobs.append((s.id, r.email, variant.subject, variant.body))
         sends.append({"send_id": s.id, "recipient": r.email, "variant_id": vid})
     db.commit()
-    return {"sends": sends}
+
+    if mode == "async" and pool is not None:
+        for args in pending_jobs:
+            await pool.enqueue_job("dispatch_send", *args)
+
+    return {"sends": sends, "mode": mode}
 
 
 @router.post("/events")
