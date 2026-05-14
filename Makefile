@@ -1,4 +1,4 @@
-.PHONY: dev worker test install clean
+.PHONY: dev worker test install seed clean
 
 VENV := .venv
 UVICORN := $(VENV)/bin/uvicorn
@@ -18,6 +18,11 @@ worker: $(ARQ)
 # `make test` — unit + integration suite (excludes slow statistical sims).
 test: $(PYTEST)
 	$(PYTEST) tests/ -q
+
+# `make seed` — create a demo campaign with the sample recipient list and run
+# two ticks so the inbox has rows immediately. Backend must be running.
+seed: $(VENV)/bin/python
+	$(VENV)/bin/python scripts/seed_demo.py
 
 # `make install` — create .venv and editable-install the package.
 install: $(VENV)/bin/python

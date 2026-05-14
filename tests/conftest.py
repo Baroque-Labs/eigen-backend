@@ -9,6 +9,10 @@ _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp.close()
 os.environ["EIGEN_DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 os.environ["EIGEN_ESP"] = "fake"
+# Force dev-mode auth (open). The repo's .env exports API keys for local
+# dev, which would otherwise leak into the test process and break every
+# test that doesn't pass a Bearer header.
+os.environ["EIGEN_API_KEYS"] = "[]"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
