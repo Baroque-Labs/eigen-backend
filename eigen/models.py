@@ -10,9 +10,26 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Org(Base):
+    __tablename__ = "org"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_key"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("org.id"))
+    key_hash: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Campaign(Base):
     __tablename__ = "campaign"
     id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("org.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     n_variants: Mapped[int] = mapped_column(Integer, default=4)
     n_batches: Mapped[int] = mapped_column(Integer, default=10)
@@ -78,6 +95,9 @@ class Event(Base):
 class Suppression(Base):
     __tablename__ = "suppression"
     id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("org.id"), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
     reason: Mapped[str] = mapped_column(String(40))  # bounce | complaint | unsubscribe
     at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("org_id", "email", name="uq_suppression_org_email"),)

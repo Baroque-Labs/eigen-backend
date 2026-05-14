@@ -124,16 +124,29 @@ def _apply_event(db: Session, evt: NormalizedEvent) -> dict:
         v.alpha += 1.0
         send.settled_at = utcnow()
 
-    # Suppression
-    if evt.kind in {"bounced", "complained", "unsubscribed"} and evt.recipient_email:
-        existing_supp = db.query(models.Suppression).filter_by(email=evt.recipient_email).first()
-        if not existing_supp:
-            db.add(
-                models.Suppression(
-                    email=evt.recipient_email,
-                    reason=("bounce" if evt.kind == "bounced" else "complaint" if evt.kind == "complained" else "unsubscribe"),
-                )
+    # Suppression — per-org. Resolve org via Send -> Campaign.
+    if evt.kind in {"bounced", "complained", "unsubscribed"} and evt.recipient_email and send:
+        campaign = db.get(models.Campaign, send.campaign_id)
+        if campaign is not None:
+            existing_supp = (
+                db.query(models.Suppression)
+                .filter_by(org_id=campaign.org_id, email=evt.recipient_email)
+                .first()
             )
+            if not existing_supp:
+                db.add(
+                    models.Suppression(
+                        org_id=campaign.org_id,
+                        email=evt.recipient_email,
+                        reason=(
+                            "bounce"
+                            if evt.kind == "bounced"
+                            else "complaint"
+                            if evt.kind == "complained"
+                            else "unsubscribe"
+                        ),
+                    )
+                )
 
     try:
         db.commit()

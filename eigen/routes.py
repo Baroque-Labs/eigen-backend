@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from eigen import models, schemas
+from eigen.auth import hash_key, mint_key, require_org
 from eigen.bandit import inherited_prior, prob_best, sample_variant
 from eigen.config import settings
 from eigen.db import get_db
@@ -20,11 +21,16 @@ router = APIRouter()
 
 
 @router.post("/campaigns")
-def create_campaign(payload: schemas.CampaignIn, db: Session = Depends(get_db)):
+def create_campaign(
+    payload: schemas.CampaignIn,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
     if not payload.emails:
         raise HTTPException(400, "need at least one recipient")
     batch_size = max(1, math.ceil(len(payload.emails) / payload.n_batches))
     c = models.Campaign(
+        org_id=org.id,
         name=payload.name,
         n_variants=payload.n_variants,
         n_batches=payload.n_batches,
@@ -67,6 +73,13 @@ def create_campaign(payload: schemas.CampaignIn, db: Session = Depends(get_db)):
     return {"id": c.id, "name": c.name, "batch_size": batch_size, "n_variants": payload.n_variants}
 
 
+def _owned_campaign(db: Session, campaign_id: int, org: models.Org) -> models.Campaign:
+    c = db.get(models.Campaign, campaign_id)
+    if not c or c.org_id != org.id:
+        raise HTTPException(404, "campaign not found")
+    return c
+
+
 _pool = None
 
 
@@ -78,18 +91,20 @@ async def _get_pool():
 
 
 @router.post("/campaigns/{campaign_id}/tick")
-async def tick(campaign_id: int, db: Session = Depends(get_db)):
+async def tick(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
     """Pull next batch_size recipients, Thompson-sample a variant each, dispatch.
 
     In sync mode dispatches inline. In async mode enqueues to arq and returns immediately
     (Send rows are persisted with no provider_message_id; the worker fills them in).
     """
-    c = db.get(models.Campaign, campaign_id)
-    if not c:
-        raise HTTPException(404, "campaign not found")
+    c = _owned_campaign(db, campaign_id, org)
 
     sent_ids = select(models.Send.recipient_id).where(models.Send.campaign_id == campaign_id)
-    suppressed = select(models.Suppression.email)
+    suppressed = select(models.Suppression.email).where(models.Suppression.org_id == org.id)
     batch = (
         db.query(models.Recipient)
         .filter(
@@ -152,11 +167,17 @@ def ingest_event(payload: schemas.EventIn, db: Session = Depends(get_db)):
 
 
 @router.post("/campaigns/{campaign_id}/settle")
-def settle(campaign_id: int, window_seconds: int = 0, db: Session = Depends(get_db)):
+def settle(
+    campaign_id: int,
+    window_seconds: int = 0,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
     """Settle sends older than `window_seconds` as failures (β += 1).
 
     window_seconds=0 means 'settle everything outstanding now' (useful for testing).
     """
+    _owned_campaign(db, campaign_id, org)
     cutoff = utcnow() - timedelta(seconds=window_seconds)
     unsettled = (
         db.query(models.Send)
@@ -176,24 +197,33 @@ def settle(campaign_id: int, window_seconds: int = 0, db: Session = Depends(get_
 
 
 @router.post("/campaigns/{campaign_id}/research")
-def research(campaign_id: int, db: Session = Depends(get_db)):
+def research(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
+    _owned_campaign(db, campaign_id, org)
     return run_research(db, campaign_id)
 
 
 @router.get("/campaigns/{campaign_id}/_truth")
-def truth(campaign_id: int, db: Session = Depends(get_db)):
+def truth(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
     """SMOKE-SCREEN ONLY: ground-truth CTRs used by the simulator."""
-    c = db.get(models.Campaign, campaign_id)
-    if not c:
-        raise HTTPException(404, "campaign not found")
+    c = _owned_campaign(db, campaign_id, org)
     return {"true_ctrs": c.true_ctrs}
 
 
 @router.get("/campaigns/{campaign_id}/state", response_model=schemas.CampaignState)
-def state(campaign_id: int, db: Session = Depends(get_db)):
-    c = db.get(models.Campaign, campaign_id)
-    if not c:
-        raise HTTPException(404, "campaign not found")
+def state(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    org: models.Org = Depends(require_org),
+):
+    c = _owned_campaign(db, campaign_id, org)
     variants = db.query(models.Variant).filter_by(campaign_id=campaign_id).all()
     active = [v for v in variants if v.status == "active"]
     pb = prob_best(active) if active else {}
