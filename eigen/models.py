@@ -31,12 +31,15 @@ class Campaign(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     org_id: Mapped[int] = mapped_column(ForeignKey("org.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(20), default="running")  # running | stopped
     n_variants: Mapped[int] = mapped_column(Integer, default=4)
     n_batches: Mapped[int] = mapped_column(Integer, default=10)
     batch_size: Mapped[int] = mapped_column(Integer, default=100)
     # smoke-screen: hidden ground-truth CTR per variant_id for simulation
     true_ctrs: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    stopped_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     variants: Mapped[list["Variant"]] = relationship(back_populates="campaign")
     recipients: Mapped[list["Recipient"]] = relationship(back_populates="campaign")
@@ -48,13 +51,27 @@ class Variant(Base):
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaign.id"))
     subject: Mapped[str] = mapped_column(String(500))
     body: Mapped[str] = mapped_column(String(2000), default="")
-    alpha: Mapped[float] = mapped_column(Float, default=1.0)  # successes + 1
-    beta: Mapped[float] = mapped_column(Float, default=1.0)  # failures + 1
-    status: Mapped[str] = mapped_column(String(20), default="active")  # active|killed
+    # Inherited-prior seed values used when a Posterior row is first created
+    # for this (variant, cohort) pair. NOT the live posterior.
+    alpha: Mapped[float] = mapped_column(Float, default=1.0)
+    beta: Mapped[float] = mapped_column(Float, default=1.0)
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active|killed|pending|rejected
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("variant.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     campaign: Mapped[Campaign] = relationship(back_populates="variants")
+
+
+class Posterior(Base):
+    """(variant, cohort) -> alpha, beta. The live posterior the sampler reads."""
+    __tablename__ = "posterior"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    variant_id: Mapped[int] = mapped_column(ForeignKey("variant.id"), index=True)
+    cohort: Mapped[str] = mapped_column(String(80), default="default", index=True)
+    alpha: Mapped[float] = mapped_column(Float, default=1.0)
+    beta: Mapped[float] = mapped_column(Float, default=1.0)
+
+    __table_args__ = (UniqueConstraint("variant_id", "cohort", name="uq_posterior_variant_cohort"),)
 
 
 class Recipient(Base):
@@ -62,6 +79,7 @@ class Recipient(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaign.id"))
     email: Mapped[str] = mapped_column(String(320))
+    cohort: Mapped[str] = mapped_column(String(80), default="default", index=True)
 
     campaign: Mapped[Campaign] = relationship(back_populates="recipients")
 
@@ -72,6 +90,7 @@ class Send(Base):
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaign.id"))
     variant_id: Mapped[int] = mapped_column(ForeignKey("variant.id"))
     recipient_id: Mapped[int] = mapped_column(ForeignKey("recipient.id"))
+    cohort: Mapped[str] = mapped_column(String(80), default="default", index=True)
     sent_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     settled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     provider: Mapped[str | None] = mapped_column(String(40), nullable=True)

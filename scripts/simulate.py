@@ -65,8 +65,11 @@ def main():
             print(f"round {i+1} | clicked {clicked}/{len(sends)} | research={research}")
             for v in st["variants"]:
                 print(
-                    f"  v{v['id']:>3} status={v['status']:<6} samples={v['samples']:<7.1f} "
-                    f"mean={v['mean']:.3f} P(best)={v['prob_best']:.3f} :: {v['subject']!r}"
+                    f"  v{v['id']:>3} status={v['status']:<8} :: {v['subject']!r} | "
+                    + " | ".join(
+                        f"{c['cohort']}: n={c['samples']:.0f} mean={c['mean']:.3f} P(best)={c['prob_best']:.3f}"
+                        for c in v['cohorts']
+                    )
                 )
         else:
             print(f"round {i+1} | clicked {clicked}/{len(sends)}")

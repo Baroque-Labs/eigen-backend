@@ -120,8 +120,11 @@ def _apply_event(db: Session, evt: NormalizedEvent) -> dict:
     db.add(event)
 
     if send and evt.kind == "click" and send.settled_at is None:
+        from eigen.bandit import get_or_create_posterior
+
         v = db.get(models.Variant, send.variant_id)
-        v.alpha += 1.0
+        p = get_or_create_posterior(db, v, send.cohort)
+        p.alpha += 1.0
         send.settled_at = utcnow()
 
     # Suppression — per-org. Resolve org via Send -> Campaign.

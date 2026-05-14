@@ -10,7 +10,7 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from eigen import models
-from eigen.bandit import sample_variant
+from eigen.bandit import get_or_create_posterior, sample_variant
 from eigen.config import settings
 from eigen.db import SessionLocal
 from eigen.esp import get_dispatcher
@@ -25,6 +25,8 @@ def _enabled() -> bool:
 
 
 def _tick_one(db, campaign: models.Campaign) -> int:
+    if campaign.status != "running":
+        return 0
     sent_ids = select(models.Send.recipient_id).where(models.Send.campaign_id == campaign.id)
     suppressed = select(models.Suppression.email).where(models.Suppression.org_id == campaign.org_id)
     batch = (
@@ -41,15 +43,18 @@ def _tick_one(db, campaign: models.Campaign) -> int:
         return 0
 
     variants = db.query(models.Variant).filter_by(campaign_id=campaign.id).all()
-    if not [v for v in variants if v.status == "active"]:
+    active = [v for v in variants if v.status == "active"]
+    if not active:
         return 0
 
     dispatcher = get_dispatcher()
     n_sent = 0
     for r in batch:
-        vid = sample_variant(variants)
-        variant = next(v for v in variants if v.id == vid)
-        s = models.Send(campaign_id=campaign.id, variant_id=vid, recipient_id=r.id)
+        vid = sample_variant(db, active, r.cohort)
+        variant = next(v for v in active if v.id == vid)
+        s = models.Send(
+            campaign_id=campaign.id, variant_id=vid, recipient_id=r.id, cohort=r.cohort
+        )
         db.add(s)
         db.flush()
         result = dispatcher.send(
@@ -92,7 +97,8 @@ async def cron_settle_campaigns(ctx) -> dict:
         )
         for s in unsettled:
             v = db.get(models.Variant, s.variant_id)
-            v.beta += 1.0
+            p = get_or_create_posterior(db, v, s.cohort)
+            p.beta += 1.0
             s.settled_at = utcnow()
         db.commit()
         return {"settled": len(unsettled)}

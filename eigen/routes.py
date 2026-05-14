@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from eigen import models, schemas
 from eigen.auth import hash_key, mint_key, require_org
-from eigen.bandit import inherited_prior, prob_best, sample_variant
+from eigen.bandit import get_or_create_posterior, inherited_prior, prob_best, sample_variant, samples_observed
 from eigen.generator import get_generator
 from eigen.config import settings
 from eigen.db import get_db
@@ -27,9 +27,10 @@ def create_campaign(
     db: Session = Depends(get_db),
     org: models.Org = Depends(require_org),
 ):
-    if not payload.emails:
+    all_recipients = payload.all_recipients()
+    if not all_recipients:
         raise HTTPException(400, "need at least one recipient")
-    batch_size = max(1, math.ceil(len(payload.emails) / payload.n_batches))
+    batch_size = max(1, math.ceil(len(all_recipients) / payload.n_batches))
     c = models.Campaign(
         org_id=org.id,
         name=payload.name,
@@ -75,8 +76,8 @@ def create_campaign(
     c.true_ctrs = ctrs
 
     # Recipients
-    for email in payload.emails:
-        db.add(models.Recipient(campaign_id=c.id, email=email))
+    for r in all_recipients:
+        db.add(models.Recipient(campaign_id=c.id, email=r.email, cohort=r.cohort))
 
     db.commit()
     return {"id": c.id, "name": c.name, "batch_size": batch_size, "n_variants": payload.n_variants}
@@ -111,6 +112,8 @@ async def tick(
     (Send rows are persisted with no provider_message_id; the worker fills them in).
     """
     c = _owned_campaign(db, campaign_id, org)
+    if c.status != "running":
+        return {"sends": [], "note": f"campaign is {c.status}"}
 
     sent_ids = select(models.Send.recipient_id).where(models.Send.campaign_id == campaign_id)
     suppressed = select(models.Suppression.email).where(models.Suppression.org_id == org.id)
@@ -128,6 +131,10 @@ async def tick(
         return {"sends": [], "note": "no recipients remaining"}
 
     variants = db.query(models.Variant).filter_by(campaign_id=campaign_id).all()
+    active = [v for v in variants if v.status == "active"]
+    if not active:
+        return {"sends": [], "note": "no active variants"}
+
     mode = settings().send_mode
     dispatcher = get_dispatcher() if mode == "sync" else None
     pool = await _get_pool() if mode == "async" else None
@@ -135,9 +142,11 @@ async def tick(
     sends = []
     pending_jobs: list[tuple[int, str, str, str]] = []
     for r in batch:
-        vid = sample_variant(variants)
-        variant = next(v for v in variants if v.id == vid)
-        s = models.Send(campaign_id=campaign_id, variant_id=vid, recipient_id=r.id)
+        vid = sample_variant(db, active, r.cohort)
+        variant = next(v for v in active if v.id == vid)
+        s = models.Send(
+            campaign_id=campaign_id, variant_id=vid, recipient_id=r.id, cohort=r.cohort
+        )
         db.add(s)
         db.flush()
         if mode == "sync":
@@ -151,7 +160,9 @@ async def tick(
             s.provider_message_id = result.provider_message_id
         else:
             pending_jobs.append((s.id, r.email, variant.subject, variant.body))
-        sends.append({"send_id": s.id, "recipient": r.email, "variant_id": vid})
+        sends.append(
+            {"send_id": s.id, "recipient": r.email, "variant_id": vid, "cohort": r.cohort}
+        )
     db.commit()
 
     if mode == "async" and pool is not None:
@@ -169,7 +180,8 @@ def ingest_event(payload: schemas.EventIn, db: Session = Depends(get_db)):
     db.add(models.Event(send_id=s.id, kind=payload.kind))
     if payload.kind == "click" and s.settled_at is None:
         v = db.get(models.Variant, s.variant_id)
-        v.alpha += 1.0
+        p = get_or_create_posterior(db, v, s.cohort)
+        p.alpha += 1.0
         s.settled_at = utcnow()
     db.commit()
     return {"ok": True}
@@ -199,7 +211,8 @@ def settle(
     )
     for s in unsettled:
         v = db.get(models.Variant, s.variant_id)
-        v.beta += 1.0
+        p = get_or_create_posterior(db, v, s.cohort)
+        p.beta += 1.0
         s.settled_at = utcnow()
     db.commit()
     return {"settled": len(unsettled)}
@@ -287,21 +300,42 @@ def state(
     c = _owned_campaign(db, campaign_id, org)
     variants = db.query(models.Variant).filter_by(campaign_id=campaign_id).all()
     active = [v for v in variants if v.status == "active"]
-    pb = prob_best(active) if active else {}
+
+    # All cohorts that have any posterior in this campaign
+    variant_ids = [v.id for v in variants]
+    cohort_rows = (
+        db.query(models.Posterior.cohort)
+        .filter(models.Posterior.variant_id.in_(variant_ids))
+        .distinct()
+        .all()
+    )
+    cohorts = sorted({r[0] for r in cohort_rows}) or ["default"]
+
+    pb_by_cohort = {co: prob_best(db, active, co) for co in cohorts} if active else {}
+
     out = []
     for v in variants:
-        n = (v.alpha - 1) + (v.beta - 1)
+        per_cohort: list[schemas.CohortPosterior] = []
+        for co in cohorts:
+            p = get_or_create_posterior(db, v, co)
+            mean = p.alpha / (p.alpha + p.beta)
+            per_cohort.append(
+                schemas.CohortPosterior(
+                    cohort=co,
+                    alpha=p.alpha,
+                    beta=p.beta,
+                    mean=mean,
+                    samples=samples_observed(p.alpha, p.beta),
+                    prob_best=pb_by_cohort.get(co, {}).get(v.id, 0.0),
+                )
+            )
         out.append(
             schemas.VariantOut(
                 id=v.id,
                 subject=v.subject,
                 status=v.status,
-                alpha=v.alpha,
-                beta=v.beta,
-                mean=v.alpha / (v.alpha + v.beta),
-                samples=n,
-                prob_best=pb.get(v.id, 0.0),
                 parent_id=v.parent_id,
+                cohorts=per_cohort,
             )
         )
     total_sends = db.query(models.Send).filter_by(campaign_id=campaign_id).count()
@@ -314,10 +348,12 @@ def state(
     return schemas.CampaignState(
         id=c.id,
         name=c.name,
+        status=c.status,
         n_variants=c.n_variants,
         n_batches=c.n_batches,
         batch_size=c.batch_size,
         variants=out,
         total_sends=total_sends,
         total_clicks=total_clicks,
+        stopped_reason=c.stopped_reason,
     )
