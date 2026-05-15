@@ -58,6 +58,8 @@ def list_campaigns(
                 "status": c.status,
                 "n_variants": c.n_variants,
                 "active_variants": active_variants,
+                "batch_size": c.batch_size,
+                "cadence_minutes": c.cadence_minutes,
                 "total_sends": total_sends,
                 "total_clicks": total_clicks,
                 "created_at": c.created_at.isoformat(),
@@ -75,13 +77,15 @@ def create_campaign(
     all_recipients = payload.all_recipients()
     if not all_recipients:
         raise HTTPException(400, "need at least one recipient")
-    batch_size = max(1, math.ceil(len(all_recipients) / payload.n_batches))
     c = models.Campaign(
         org_id=org.id,
         name=payload.name,
         n_variants=payload.n_variants,
-        n_batches=payload.n_batches,
-        batch_size=batch_size,
+        batch_size=payload.batch_size,
+        cadence_minutes=payload.cadence_minutes,
+        calendar=payload.calendar.model_dump(),
+        timezone=payload.timezone,
+        settle_window_seconds=payload.settle_window_seconds,
         true_ctrs={},
     )
     db.add(c)
@@ -125,7 +129,35 @@ def create_campaign(
         db.add(models.Recipient(campaign_id=c.id, email=r.email, cohort=r.cohort))
 
     db.commit()
-    return {"id": c.id, "name": c.name, "batch_size": batch_size, "n_variants": payload.n_variants}
+    return {
+        "id": c.id,
+        "name": c.name,
+        "batch_size": c.batch_size,
+        "n_variants": c.n_variants,
+        "cadence_minutes": c.cadence_minutes,
+    }
+
+
+def _dispatch_headers(
+    send: models.Send,
+    campaign: models.Campaign,
+    variant_id: int,
+    cohort: str,
+    true_ctrs: dict,
+) -> dict[str, str]:
+    """Pack the metadata the InboxDispatcher needs into request headers.
+
+    Also useful as breadcrumbs for ResendDispatcher (X-Eigen-Send-Id is
+    already what the Resend webhook receiver looks for).
+    """
+    return {
+        "X-Eigen-Send-Id": str(send.id),
+        "X-Eigen-Campaign-Id": str(campaign.id),
+        "X-Eigen-Variant-Id": str(variant_id),
+        "X-Eigen-Org-Id": str(campaign.org_id),
+        "X-Eigen-Cohort": cohort,
+        "X-Eigen-True-Ctr": str((true_ctrs or {}).get(str(variant_id), 0.05)),
+    }
 
 
 def _owned_campaign(db: Session, campaign_id: int, org: models.Org) -> models.Campaign:
@@ -317,7 +349,7 @@ async def tick(
                 to=r.email,
                 subject=variant.subject,
                 html=variant.body,
-                headers={"X-Eigen-Send-Id": str(s.id)},
+                headers=_dispatch_headers(s, c, vid, r.cohort, c.true_ctrs),
             )
             s.provider = result.provider
             s.provider_message_id = result.provider_message_id
@@ -542,8 +574,11 @@ def state(
         name=c.name,
         status=c.status,
         n_variants=c.n_variants,
-        n_batches=c.n_batches,
         batch_size=c.batch_size,
+        cadence_minutes=c.cadence_minutes,
+        calendar=schemas.Calendar(**(c.calendar or {})),
+        timezone=c.timezone,
+        settle_window_seconds=c.settle_window_seconds,
         variants=out,
         total_sends=total_sends,
         total_clicks=total_clicks,

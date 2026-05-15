@@ -35,4 +35,8 @@ def get_dispatcher() -> Dispatcher:
         from eigen.esp.fake import FakeDispatcher
 
         return FakeDispatcher.get()
+    if name == "inbox":
+        from eigen.esp.inbox_adapter import InboxDispatcher
+
+        return InboxDispatcher()
     raise ValueError(f"unknown ESP: {name!r}")

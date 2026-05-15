@@ -8,7 +8,7 @@ def _create(client, name="x"):
             "name": name,
             "baseline": {"subject": "hi", "true_ctr": 0.05},
             "n_variants": 2,
-            "n_batches": 2,
+            "batch_size": 100,
             "emails": ["a@example.com", "b@example.com"],
         },
     ).json()

@@ -13,10 +13,17 @@ class Settings(BaseSettings):
     redis_url: str = Field("redis://localhost:6379/0", description="arq broker / cache")
 
     # ESP
-    esp: str = Field("log", description="log | resend | fake")
+    esp: str = Field("log", description="log | resend | fake | inbox")
     resend_api_key: str | None = None
     resend_webhook_secret: str | None = Field(None, description="Svix-style HMAC secret")
     sender_from: str = "Eigen <no-reply@example.com>"
+    # eigen-inbox URL (when esp=inbox). Dev: http://localhost:8001.
+    inbox_url: str = "http://localhost:8001"
+    # Shared secret the inbox sends on its webhook callbacks.
+    inbox_webhook_secret: str = "dev-secret-change-me"
+    # Synthetic clock multiplier applied to scheduler intervals + settle windows.
+    # 1.0 = real time. 60.0 = 1 wall-clock second = 1 sim minute.
+    time_scale: float = 1.0
 
     # LLM
     anthropic_api_key: str | None = None

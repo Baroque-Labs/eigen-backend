@@ -2,12 +2,12 @@
 import uuid
 
 
-def _create_campaign(client, n_recipients=20):
+def _create_campaign(client, n_recipients=20, batch_size=None):
     payload = {
         "name": "test",
         "baseline": {"subject": "Hello", "true_ctr": 0.1},
         "n_variants": 2,
-        "n_batches": 2,
+        "batch_size": batch_size if batch_size is not None else max(1, n_recipients // 2),
         "emails": [f"u{i}@example.com" for i in range(n_recipients)],
     }
     r = client.post("/campaigns", json=payload)

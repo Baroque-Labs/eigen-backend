@@ -37,7 +37,7 @@ def test_async_tick_enqueues_jobs(client, fake, monkeypatch, redis_available):
             "name": "async-test",
             "baseline": {"subject": "hi", "true_ctr": 0.05},
             "n_variants": 2,
-            "n_batches": 2,
+            "batch_size": 100,
             "emails": [f"a{i}@example.com" for i in range(4)],
         },
     ).json()

@@ -9,7 +9,7 @@ def _create(client):
             "name": "approve-test",
             "baseline": {"subject": "hi", "true_ctr": 0.05},
             "n_variants": 3,
-            "n_batches": 2,
+            "batch_size": 100,
             "emails": [f"u{i}@example.com" for i in range(6)],
         },
     ).json()

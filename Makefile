@@ -21,8 +21,9 @@ test: $(PYTEST)
 
 # `make seed` — create a demo campaign with the sample recipient list and run
 # two ticks so the inbox has rows immediately. Backend must be running.
+# Sources .env so FRONTEND_DATABASE_URL (and friends) reach the script.
 seed: $(VENV)/bin/python
-	$(VENV)/bin/python scripts/seed_demo.py
+	@set -a; [ -f .env ] && . ./.env; set +a; $(VENV)/bin/python scripts/seed_demo.py
 
 # `make install` — create .venv and editable-install the package.
 install: $(VENV)/bin/python

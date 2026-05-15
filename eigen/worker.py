@@ -18,8 +18,13 @@ def _redis_settings() -> RedisSettings:
 class WorkerSettings:
     functions = [dispatch_send]
     cron_jobs = [
-        cron(cron_tick_campaigns, second=0),  # every minute on :00
-        cron(cron_settle_campaigns, second=30),  # every minute on :30
+        # Every 10 wall-seconds. Each cron-firing consults each campaign's
+        # cadence_minutes + calendar + last_tick_at to decide whether to
+        # actually dispatch. Granular tick + EIGEN_TIME_SCALE means a
+        # cadence_minutes=60 campaign at TIME_SCALE=60 fires every ~60s of
+        # wall-clock; at TIME_SCALE=1 it fires every ~60 minutes of wall.
+        cron(cron_tick_campaigns, second=set(range(0, 60, 10))),
+        cron(cron_settle_campaigns, second=set(range(5, 60, 10))),  # offset 5s
         cron(cron_research_campaigns, minute=set(range(0, 60, 5))),  # every 5 min
     ]
     redis_settings = _redis_settings()

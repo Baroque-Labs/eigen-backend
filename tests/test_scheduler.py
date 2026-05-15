@@ -23,18 +23,20 @@ def test_scheduler_ticks_all_campaigns(client, monkeypatch):
                 "name": name,
                 "baseline": {"subject": f"hi {name}", "true_ctr": 0.05},
                 "n_variants": 2,
-                "n_batches": 2,
+                "batch_size": 100,
                 "emails": [f"{name}{i}@example.com" for i in range(4)],
             },
         ).raise_for_status()
 
     result = asyncio.run(cron_tick_campaigns(ctx={}))
     assert "ticked" in result
+    # With cadence_minutes=60 (default) and last_tick_at=None, both fire on
+    # the first sweep. Subsequent sweeps within wall_seconds_between_ticks
+    # would be no-ops.
     assert len(result["ticked"]) == 2
 
-    # Now settle should close them out (window_seconds=0 path doesn't apply, but
-    # settle window defaults to 24h — so newly-sent records won't settle yet).
+    # Settle with default 24h sim-window: nothing settles yet.
     settle_result = asyncio.run(cron_settle_campaigns(ctx={}))
-    assert settle_result["settled"] == 0  # window hasn't elapsed
+    assert settle_result["settled"] == {}
 
     settings.cache_clear()

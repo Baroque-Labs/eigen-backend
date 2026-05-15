@@ -33,13 +33,26 @@ class Campaign(Base):
     name: Mapped[str] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(20), default="running")  # running | stopped
     n_variants: Mapped[int] = mapped_column(Integer, default=4)
-    n_batches: Mapped[int] = mapped_column(Integer, default=10)
+    # Number of recipients per batch. Explicit (not derived from n_batches).
     batch_size: Mapped[int] = mapped_column(Integer, default=100)
+    # How often the scheduler should fire a new batch (sim minutes).
+    cadence_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    # Calendar restricts when the scheduler dispatches. JSON shape:
+    #   {"weekdays": [1,2,3,4,5], "hours": [9,10,...,17]}
+    # weekday 1=Mon...7=Sun (ISO). Empty list / missing key = any.
+    calendar: Mapped[dict] = mapped_column(JSON, default=dict)
+    # IANA tz name applied when evaluating the calendar.
+    timezone: Mapped[str] = mapped_column(String(60), default="UTC")
+    # Per-campaign settle window (sim seconds). Sends older than this
+    # without a click get β bumped.
+    settle_window_seconds: Mapped[int] = mapped_column(Integer, default=86400)
     # smoke-screen: hidden ground-truth CTR per variant_id for simulation
     true_ctrs: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     stopped_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Last time the scheduler dispatched a batch for this campaign.
+    last_tick_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     variants: Mapped[list["Variant"]] = relationship(back_populates="campaign")
     recipients: Mapped[list["Recipient"]] = relationship(back_populates="campaign")

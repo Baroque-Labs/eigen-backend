@@ -59,6 +59,18 @@ def parse_resend(payload: dict, headers: dict[str, str]) -> NormalizedEvent:
     )
 
 
+def parse_inbox(payload: dict, headers: dict[str, str]) -> NormalizedEvent:
+    """eigen-inbox callback. Authenticated by X-Eigen-Inbox-Secret header."""
+    return NormalizedEvent(
+        provider="inbox",
+        provider_event_id=payload["event_id"],
+        kind=payload["kind"],
+        provider_message_id=payload.get("provider_message_id"),
+        recipient_email=payload.get("to"),
+        raw=payload,
+    )
+
+
 def parse_fake(payload: dict, headers: dict[str, str]) -> NormalizedEvent:
     """FakeESP doesn't sign — tests post directly here."""
     return NormalizedEvent(
@@ -166,6 +178,17 @@ async def webhook_resend(request: Request, db: Session = Depends(get_db)):
     verify_resend(body, headers)
     payload = await request.json()
     evt = parse_resend(payload, headers)
+    return _apply_event(db, evt)
+
+
+@router.post("/inbox")
+async def webhook_inbox(request: Request, db: Session = Depends(get_db)):
+    """eigen-inbox calls this when a conversion fires. Auth via shared secret."""
+    secret = request.headers.get("X-Eigen-Inbox-Secret")
+    if not secret or secret != settings().inbox_webhook_secret:
+        raise HTTPException(401, "invalid inbox secret")
+    payload = await request.json()
+    evt = parse_inbox(payload, dict(request.headers))
     return _apply_event(db, evt)
 
 

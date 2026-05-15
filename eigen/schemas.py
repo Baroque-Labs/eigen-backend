@@ -12,11 +12,21 @@ class RecipientIn(BaseModel):
     cohort: str = "default"
 
 
+class Calendar(BaseModel):
+    """When the scheduler may dispatch. Empty list = any."""
+    weekdays: list[int] = Field(default_factory=list, description="ISO 1=Mon..7=Sun")
+    hours: list[int] = Field(default_factory=list, description="0..23, in campaign tz")
+
+
 class CampaignIn(BaseModel):
     name: str
     baseline: BaselineVariant
     n_variants: int = Field(4, ge=1, le=64)
-    n_batches: int = Field(10, ge=1)
+    batch_size: int = Field(100, ge=1, description="Recipients per dispatched batch")
+    cadence_minutes: int = Field(60, ge=1, description="Sim-minutes between batches")
+    calendar: Calendar = Field(default_factory=Calendar)
+    timezone: str = "UTC"
+    settle_window_seconds: int = Field(86400, ge=1, description="Sim-seconds before un-clicked = failure")
     # Two ways to specify recipients: plain emails (all in "default" cohort) or
     # the richer form with explicit cohorts. Both can be combined.
     emails: list[EmailStr] = Field(default_factory=list)
@@ -56,8 +66,11 @@ class CampaignState(BaseModel):
     name: str
     status: str
     n_variants: int
-    n_batches: int
     batch_size: int
+    cadence_minutes: int
+    calendar: Calendar
+    timezone: str
+    settle_window_seconds: int
     variants: list[VariantOut]
     total_sends: int
     total_clicks: int

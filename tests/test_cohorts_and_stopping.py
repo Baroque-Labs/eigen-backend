@@ -8,7 +8,7 @@ def _create(client, recipients):
             "name": "cohort-test",
             "baseline": {"subject": "hi", "true_ctr": 0.05},
             "n_variants": 2,
-            "n_batches": 2,
+            "batch_size": 100,
             "recipients": recipients,
         },
     ).json()
