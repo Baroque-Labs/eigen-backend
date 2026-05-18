@@ -536,12 +536,50 @@ def state(
 
     pb_by_cohort = {co: prob_best(db, active, co) for co in cohorts} if active else {}
 
+    # Per (variant, cohort) send breakdown. Single pass over Send rows + a
+    # set of clicked send_ids so we can classify each.
+    from sqlalchemy import case, func
+
+    send_rows = (
+        db.query(
+            models.Send.variant_id,
+            models.Send.cohort,
+            func.count(models.Send.id).label("sent"),
+            func.sum(case((models.Send.settled_at.is_(None), 1), else_=0)).label("in_flight"),
+        )
+        .filter(models.Send.campaign_id == campaign_id)
+        .group_by(models.Send.variant_id, models.Send.cohort)
+        .all()
+    )
+    sends_by_key: dict[tuple[int, str], dict] = {
+        (vid, coh): {"sent": int(sent or 0), "in_flight": int(infl or 0)}
+        for vid, coh, sent, infl in send_rows
+    }
+    click_rows = (
+        db.query(
+            models.Send.variant_id,
+            models.Send.cohort,
+            func.count(func.distinct(models.Send.id)).label("converted"),
+        )
+        .join(models.Event, models.Event.send_id == models.Send.id)
+        .filter(models.Send.campaign_id == campaign_id, models.Event.kind == "click")
+        .group_by(models.Send.variant_id, models.Send.cohort)
+        .all()
+    )
+    converted_by_key: dict[tuple[int, str], int] = {
+        (vid, coh): int(n or 0) for vid, coh, n in click_rows
+    }
+
     out = []
     for v in variants:
         per_cohort: list[schemas.CohortPosterior] = []
         for co in cohorts:
             p = get_or_create_posterior(db, v, co)
             mean = p.alpha / (p.alpha + p.beta)
+            stats = sends_by_key.get((v.id, co), {"sent": 0, "in_flight": 0})
+            converted = converted_by_key.get((v.id, co), 0)
+            settled = stats["sent"] - stats["in_flight"]
+            lost = max(0, settled - converted)
             per_cohort.append(
                 schemas.CohortPosterior(
                     cohort=co,
@@ -550,6 +588,10 @@ def state(
                     mean=mean,
                     samples=samples_observed(p.alpha, p.beta),
                     prob_best=pb_by_cohort.get(co, {}).get(v.id, 0.0),
+                    sent=stats["sent"],
+                    in_flight=stats["in_flight"],
+                    converted=converted,
+                    lost=lost,
                 )
             )
         out.append(

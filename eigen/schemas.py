@@ -50,6 +50,12 @@ class CohortPosterior(BaseModel):
     mean: float
     samples: float
     prob_best: float
+    # Send breakdown for this (variant, cohort). All counts are observed
+    # events, not posterior counts (which include the prior).
+    sent: int = 0
+    in_flight: int = 0  # dispatched, not yet settled
+    converted: int = 0  # had a click event
+    lost: int = 0  # settled with no click
 
 
 class VariantOut(BaseModel):
