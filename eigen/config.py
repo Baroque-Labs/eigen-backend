@@ -23,9 +23,6 @@ class Settings(BaseSettings):
     inbox_url: str = "http://localhost:8001"
     # Shared secret the inbox sends on its webhook callbacks.
     inbox_webhook_secret: str = "dev-secret-change-me"
-    # Synthetic clock multiplier applied to scheduler intervals + settle windows.
-    # 1.0 = real time. 60.0 = 1 wall-clock second = 1 sim minute.
-    time_scale: float = 1.0
 
     # LLM
     anthropic_api_key: str | None = None

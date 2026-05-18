@@ -38,8 +38,9 @@ class FakeDispatcher:
             cls._instance = None
 
     def send(self, *, to: str, subject: str, html: str, headers: dict[str, str] | None = None) -> SendResult:
-        mid = f"fake_{uuid.uuid4().hex}"
+        h = dict(headers or {})
+        mid = h.get("X-Eigen-Provider-Message-Id") or f"fake_{uuid.uuid4().hex}"
         self.sends.append(
-            RecordedSend(provider_message_id=mid, to=to, subject=subject, html=html, headers=dict(headers or {}))
+            RecordedSend(provider_message_id=mid, to=to, subject=subject, html=html, headers=h)
         )
         return SendResult(provider=self.name, provider_message_id=mid)

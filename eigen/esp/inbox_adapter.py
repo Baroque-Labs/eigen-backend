@@ -27,6 +27,10 @@ class InboxDispatcher:
         headers: dict[str, str] | None = None,
     ) -> SendResult:
         headers = headers or {}
+        # Backend pre-assigns provider_message_id and stores it on the Send
+        # row before calling us. Inbox MUST honor it so webhook callbacks can
+        # find the row.
+        msg_id = headers.get("X-Eigen-Provider-Message-Id") or f"inbox_{uuid.uuid4().hex}"
         try:
             payload = {
                 "backend_send_id": int(headers.get("X-Eigen-Send-Id", 0)),
@@ -38,20 +42,15 @@ class InboxDispatcher:
                 "subject": subject,
                 "body": html or "",
                 "true_ctr": float(headers.get("X-Eigen-True-Ctr", "0.05")),
+                "provider_message_id": msg_id,
             }
         except (TypeError, ValueError) as e:
             log.error("invalid headers for inbox dispatch: %s headers=%s", e, headers)
-            return SendResult(provider=self.name, provider_message_id=f"inbox_dead_{uuid.uuid4().hex}")
+            return SendResult(provider=self.name, provider_message_id=msg_id)
 
         try:
-            r = httpx.post(
-                f"{settings().inbox_url}/send",
-                json=payload,
-                timeout=5.0,
-            )
+            r = httpx.post(f"{settings().inbox_url}/send", json=payload, timeout=5.0)
             r.raise_for_status()
-            body = r.json()
-            return SendResult(provider=self.name, provider_message_id=body["provider_message_id"])
         except httpx.HTTPError as e:
             log.warning("inbox /send failed (%s), dropping email on the floor", e)
-            return SendResult(provider=self.name, provider_message_id=f"inbox_dead_{uuid.uuid4().hex}")
+        return SendResult(provider=self.name, provider_message_id=msg_id)

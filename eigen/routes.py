@@ -334,31 +334,47 @@ async def tick(
     dispatcher = get_dispatcher() if mode == "sync" else None
     pool = await _get_pool() if mode == "async" else None
 
-    sends = []
-    pending_jobs: list[tuple[int, str, str, str]] = []
+    # Two-pass: first create + COMMIT every Send row (with a pre-assigned
+    # provider_message_id) so any inbound webhook can find it; then dispatch.
+    # Without this, the inbox's converter can race the dispatch and POST a
+    # click webhook before the Send row is visible to other DB sessions.
+    import uuid as _uuid
+
+    dispatcher_name = dispatcher.name if dispatcher else "async"
+    plan: list[tuple[models.Send, models.Variant, models.Recipient]] = []
     for r in batch:
         vid = sample_variant(db, active, r.cohort)
         variant = next(v for v in active if v.id == vid)
         s = models.Send(
-            campaign_id=campaign_id, variant_id=vid, recipient_id=r.id, cohort=r.cohort
+            campaign_id=campaign_id,
+            variant_id=vid,
+            recipient_id=r.id,
+            cohort=r.cohort,
+            provider=dispatcher_name,
+            provider_message_id=f"send_{_uuid.uuid4().hex}",
         )
         db.add(s)
-        db.flush()
+        plan.append((s, variant, r))
+    db.commit()  # all Send rows now visible to webhook handlers
+
+    sends = []
+    pending_jobs: list[tuple[int, str, str, str]] = []
+    for s, variant, r in plan:
         if mode == "sync":
-            result = dispatcher.send(
+            dispatcher.send(
                 to=r.email,
                 subject=variant.subject,
                 html=variant.body,
-                headers=_dispatch_headers(s, c, vid, r.cohort, c.true_ctrs),
+                headers={
+                    **_dispatch_headers(s, c, s.variant_id, r.cohort, c.true_ctrs),
+                    "X-Eigen-Provider-Message-Id": s.provider_message_id,
+                },
             )
-            s.provider = result.provider
-            s.provider_message_id = result.provider_message_id
         else:
             pending_jobs.append((s.id, r.email, variant.subject, variant.body))
         sends.append(
-            {"send_id": s.id, "recipient": r.email, "variant_id": vid, "cohort": r.cohort}
+            {"send_id": s.id, "recipient": r.email, "variant_id": s.variant_id, "cohort": r.cohort}
         )
-    db.commit()
 
     if mode == "async" and pool is not None:
         for args in pending_jobs:
