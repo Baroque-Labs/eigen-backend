@@ -19,7 +19,11 @@ import os
 import sys
 from pathlib import Path
 
-import httpx
+from eigen.envloader import load as _load_dotenv
+
+_load_dotenv()
+
+import httpx  # noqa: E402
 
 BASE = os.environ.get("EIGEN_SEED_BASE", "http://localhost:8000")
 NAME = os.environ.get("EIGEN_SEED_NAME", "Demo")

@@ -1,12 +1,16 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from eigen.envloader import load as _load_dotenv
 
-from eigen.admin import router as admin_router
-from eigen.db import init_db
-from eigen.routes import router
-from eigen.webhooks import router as webhooks_router
+_load_dotenv()  # MUST run before any eigen.config import below
+
+from fastapi import FastAPI  # noqa: E402
+
+from eigen.admin import router as admin_router  # noqa: E402
+from eigen.db import init_db  # noqa: E402
+from eigen.routes import router  # noqa: E402
+from eigen.webhooks import router as webhooks_router  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 

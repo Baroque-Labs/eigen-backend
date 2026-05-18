@@ -3,12 +3,20 @@
 Run with:
     arq eigen.worker.WorkerSettings
 """
-from arq import cron
-from arq.connections import RedisSettings
+from eigen.envloader import load as _load_dotenv
 
-from eigen.config import settings
-from eigen.scheduler import cron_research_campaigns, cron_settle_campaigns, cron_tick_campaigns
-from eigen.tasks import dispatch_send
+_load_dotenv()  # MUST run before any eigen.config import below
+
+from arq import cron  # noqa: E402
+from arq.connections import RedisSettings  # noqa: E402
+
+from eigen.config import settings  # noqa: E402
+from eigen.scheduler import (  # noqa: E402
+    cron_research_campaigns,
+    cron_settle_campaigns,
+    cron_tick_campaigns,
+)
+from eigen.tasks import dispatch_send  # noqa: E402
 
 
 def _redis_settings() -> RedisSettings:

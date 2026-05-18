@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="EIGEN_", extra="ignore")
+    # .env loading happens via eigen.envloader (python-dotenv with override=True)
+    # called from every entry point. Pydantic-settings here only reads os.environ.
+    model_config = SettingsConfigDict(env_prefix="EIGEN_", extra="ignore")
 
     # Storage
     database_url: str = Field("sqlite:///./eigen.db", description="SQLAlchemy URL")

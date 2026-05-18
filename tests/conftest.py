@@ -4,6 +4,10 @@ import tempfile
 
 import pytest
 
+# Skip dotenv load before importing eigen.* (otherwise the dev .env would
+# override our test fixture env vars below).
+os.environ["EIGEN_DISABLE_DOTENV"] = "1"
+
 # Configure a fresh SQLite DB per test session before importing eigen.*
 _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp.close()
